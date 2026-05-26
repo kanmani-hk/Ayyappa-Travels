@@ -25,6 +25,7 @@ export default function AdminDashboard() {
 
   // Create/Edit Vehicle Form states
   const [showAddVehicleForm, setShowAddVehicleForm] = useState(false);
+  const [editingVehicleId, setEditingVehicleId] = useState(null);
   const [newVehicle, setNewVehicle] = useState({
     name: '',
     type: 'car',
@@ -184,7 +185,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // Add Vehicle Submit
+  // Add/Edit Vehicle Submit
   const handleAddVehicle = async (e) => {
     e.preventDefault();
     try {
@@ -197,28 +198,62 @@ export default function AdminDashboard() {
         image: newVehicle.image || '',
       };
 
-      const response = await API.post('/vehicles', payload);
-      if (response.data && response.data.success) {
-        setVehicles([...vehicles, response.data.data]);
-        setShowAddVehicleForm(false);
-        // Reset form
-        setNewVehicle({ name: '', type: 'car', seats: 5, ratePerKm: 12, features: '', image: '', description: '' });
-        alert('New vehicle model added to fleet successfully!');
+      if (editingVehicleId) {
+        const response = await API.put(`/vehicles/${editingVehicleId}`, payload);
+        if (response.data && response.data.success) {
+          setVehicles(vehicles.map((v) => (v._id === editingVehicleId ? response.data.data : v)));
+          setShowAddVehicleForm(false);
+          setEditingVehicleId(null);
+          setNewVehicle({ name: '', type: 'car', seats: 5, ratePerKm: 12, features: '', image: '', description: '' });
+          alert('Vehicle model updated successfully!');
+        }
+      } else {
+        const response = await API.post('/vehicles', payload);
+        if (response.data && response.data.success) {
+          setVehicles([...vehicles, response.data.data]);
+          setShowAddVehicleForm(false);
+          setNewVehicle({ name: '', type: 'car', seats: 5, ratePerKm: 12, features: '', image: '', description: '' });
+          alert('New vehicle model added to fleet successfully!');
+        }
       }
     } catch (err) {
-      console.warn('Could not create vehicle on server, simulating locally.', err);
-      const mockNewVehicle = {
-        _id: 'mock_' + Date.now(),
-        ...newVehicle,
-        seats: Number(newVehicle.seats),
-        ratePerKm: Number(newVehicle.ratePerKm),
-        features: newVehicle.features.split(','),
-        isAvailable: true,
-      };
-      setVehicles([...vehicles, mockNewVehicle]);
-      setShowAddVehicleForm(false);
-      alert('New vehicle model added to fleet successfully! (Local state)');
+      if (err.response && err.response.data && err.response.data.message) {
+        alert(`Failed to ${editingVehicleId ? 'update' : 'add'} vehicle: ` + err.response.data.message);
+      } else {
+        console.warn(`Could not ${editingVehicleId ? 'update' : 'create'} vehicle on server, simulating locally.`, err);
+        const mockVehicle = {
+          _id: editingVehicleId || 'mock_' + Date.now(),
+          ...newVehicle,
+          seats: Number(newVehicle.seats),
+          ratePerKm: Number(newVehicle.ratePerKm),
+          features: newVehicle.features.split(','),
+          isAvailable: true,
+        };
+        if (editingVehicleId) {
+           setVehicles(vehicles.map(v => v._id === editingVehicleId ? mockVehicle : v));
+        } else {
+           setVehicles([...vehicles, mockVehicle]);
+        }
+        setShowAddVehicleForm(false);
+        setEditingVehicleId(null);
+        alert(`Vehicle model ${editingVehicleId ? 'updated' : 'added'} successfully! (Local state)`);
+      }
     }
+  };
+
+  const handleEditClick = (v) => {
+    setEditingVehicleId(v._id);
+    setNewVehicle({
+      name: v.name,
+      type: v.type || 'car',
+      seats: v.seats,
+      ratePerKm: v.ratePerKm,
+      features: v.features.join(', '),
+      image: v.image || '',
+      description: v.description || '',
+    });
+    setShowAddVehicleForm(true);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const activeAdminUser = JSON.parse(localStorage.getItem('ayyappa_admin_user') || '{"name": "Ayyappa Travels Desk"}');
@@ -463,7 +498,11 @@ export default function AdminDashboard() {
                   <p className="text-slate-400 text-xs mt-1">Manage pricing details per KM and models availability.</p>
                 </div>
                 <button
-                  onClick={() => setShowAddVehicleForm(!showAddVehicleForm)}
+                  onClick={() => {
+                    setEditingVehicleId(null);
+                    setNewVehicle({ name: '', type: 'car', seats: 5, ratePerKm: 12, features: '', image: '', description: '' });
+                    setShowAddVehicleForm(!showAddVehicleForm);
+                  }}
                   className="bg-brand-500 hover:bg-brand-600 text-white font-extrabold text-xs px-4 py-2.5 rounded-xl shadow-md flex items-center space-x-1 transition-transform hover:-translate-y-0.5"
                 >
                   <Plus className="h-4 w-4" />
@@ -474,7 +513,7 @@ export default function AdminDashboard() {
               {/* Add Vehicle Form Panel */}
               {showAddVehicleForm && (
                 <form onSubmit={handleAddVehicle} className="bg-slate-50 border border-slate-100 p-6 rounded-3xl space-y-4">
-                  <h4 className="font-extrabold text-slate-950 text-sm">Add New Model</h4>
+                  <h4 className="font-extrabold text-slate-950 text-sm">{editingVehicleId ? 'Edit Vehicle Model' : 'Add New Model'}</h4>
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                     <div className="space-y-1">
                       <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Vehicle Name</label>
@@ -545,12 +584,27 @@ export default function AdminDashboard() {
                         className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs"
                       />
                     </div>
+
+                    <div className="space-y-1 sm:col-span-3">
+                      <label className="block text-[10px] font-bold text-slate-500 uppercase tracking-wide">Vehicle Description</label>
+                      <textarea
+                        value={newVehicle.description}
+                        onChange={(e) => setNewVehicle({ ...newVehicle, description: e.target.value })}
+                        placeholder="e.g. Spacious and comfortable family car perfect for long trips..."
+                        rows="3"
+                        className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs resize-none"
+                      />
+                    </div>
                   </div>
 
                   <div className="flex justify-end space-x-2 pt-2">
                     <button
                       type="button"
-                      onClick={() => setShowAddVehicleForm(false)}
+                      onClick={() => {
+                        setShowAddVehicleForm(false);
+                        setEditingVehicleId(null);
+                        setNewVehicle({ name: '', type: 'car', seats: 5, ratePerKm: 12, features: '', image: '', description: '' });
+                      }}
                       className="border border-slate-200 px-4 py-2 rounded-xl text-xs font-bold hover:bg-slate-100"
                     >
                       Cancel
@@ -559,7 +613,7 @@ export default function AdminDashboard() {
                       type="submit"
                       className="bg-brand-500 hover:bg-brand-600 text-white px-4 py-2 rounded-xl text-xs font-bold"
                     >
-                      Save Model
+                      {editingVehicleId ? 'Update Model' : 'Save Model'}
                     </button>
                   </div>
                 </form>
@@ -594,7 +648,7 @@ export default function AdminDashboard() {
                         <span className="text-[10px] text-slate-400 font-semibold">/ KM</span>
                       </div>
 
-                      {/* Availability toggle toggle */}
+                      {/* Availability toggle and Edit button */}
                       <div className="flex items-center space-x-2 pt-1">
                         <button
                           onClick={() => handleToggleVehicleAvailability(v._id, v.isAvailable)}
@@ -602,6 +656,13 @@ export default function AdminDashboard() {
                             }`}
                         >
                           {v.isAvailable ? 'Available' : 'Booked / Maintenance'}
+                        </button>
+                        <button
+                          onClick={() => handleEditClick(v)}
+                          className="px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-wider bg-brand-50 text-brand-600 hover:bg-brand-100 flex items-center space-x-1"
+                        >
+                          <Edit3 className="h-3 w-3" />
+                          <span>Edit</span>
                         </button>
                       </div>
                     </div>
